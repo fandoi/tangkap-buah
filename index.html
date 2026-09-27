@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Tangkap Buah - Hand Tracking</title>
+<title>Tangkap Buah - Kamera</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#0f172a;color:#fff;font-family:system-ui,Arial,sans-serif}
 .wrap{max-width:900px;margin:auto;padding:14px}.top{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
@@ -14,26 +14,27 @@ video{position:absolute;width:100%;height:100%;object-fit:cover;transform:scaleX
 .question{position:absolute;top:10px;left:10px;right:10px;z-index:5;background:#0f172ddd;padding:11px 14px;border-radius:14px;font-size:clamp(17px,3.8vw,25px);font-weight:900;text-align:center}
 .fruit{position:absolute;width:74px;height:74px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:43px;background:#fff;color:#111;box-shadow:0 5px 15px #0006;border:3px solid #fff;z-index:4}
 .fruit span{position:absolute;bottom:-25px;background:#fff;color:#111;padding:2px 8px;border-radius:8px;font-size:16px;font-weight:900}
-.cursor{position:absolute;width:48px;height:48px;border:4px solid #22c55e;border-radius:50%;transform:translate(-50%,-50%);z-index:10;pointer-events:none;display:none;background:#22c55e44}
-#status{text-align:center;font-weight:800;margin:10px 0;min-height:25px}
-.controls{display:flex;gap:9px;flex-wrap:wrap;margin-top:11px}.controls button{border:0;border-radius:13px;padding:13px 17px;font-size:16px;font-weight:900;min-height:48px}
+.cursor{position:absolute;width:50px;height:50px;border:4px solid #22c55e;border-radius:50%;transform:translate(-50%,-50%);z-index:10;pointer-events:none;display:none;background:#22c55e44}
+#status{text-align:center;font-weight:800;margin:10px 0;min-height:25px}.controls{display:flex;gap:9px;flex-wrap:wrap;margin-top:11px}
+.controls button{border:0;border-radius:13px;padding:13px 17px;font-size:16px;font-weight:900;min-height:48px}
 #start{background:#22c55e;color:#052e16}#stop{background:#ef4444;color:#fff}
 .note{color:#cbd5e1;font-size:13px;line-height:1.45}
 </style>
 </head>
 <body>
 <div class="wrap">
-<div class="top"><h1>🍎 Tangkap Buah — Hand Tracking</h1><div class="stats"><div class="pill">Skor: <b id="score">0</b></div><div class="pill">Soal: <b id="qn">1</b>/5</div></div></div>
+<div class="top"><h1>🍎 Tangkap Buah — Kamera</h1><div class="stats"><div class="pill">Skor: <b id="score">0</b></div><div class="pill">Soal: <b id="qn">1</b>/5</div></div></div>
 <div id="stage"><video id="video" autoplay muted playsinline></video><div id="game"><div class="question" id="question">Tekan Mulai Kamera</div><div id="cursor" class="cursor"></div></div></div>
-<div id="status">Versi perbaikan: deteksi tangan memakai CPU agar lebih kompatibel dengan HP.</div>
+<div id="status">Kamera dan game siap.</div>
 <div class="controls"><button id="start" type="button">📷 Mulai Kamera & Game</button><button id="stop" type="button">⏹ Berhenti</button></div>
-<p class="note">Setelah kamera aktif, tunggu beberapa detik sampai tertulis “Tangan terdeteksi”. Gunakan satu tangan, telapak menghadap kamera, dan usahakan tangan terlihat utuh.</p>
+<p class="note">Versi ini mencoba beberapa server library. Setelah kamera aktif, tunggu sampai status berubah menjadi “Tangan terdeteksi”.</p>
 </div>
 
 <script>
 const video=document.getElementById('video'),game=document.getElementById('game'),cursor=document.getElementById('cursor');
 const statusEl=document.getElementById('status'),qEl=document.getElementById('question'),scoreEl=document.getElementById('score'),qnEl=document.getElementById('qn');
 const startBtn=document.getElementById('start'),stopBtn=document.getElementById('stop');
+
 const questions=[
  ["Hasil dari 1/2 × 4 adalah ...",["2","3","4","6"],"2"],
  ["Hasil dari 3/4 × 8 adalah ...",["4","6","8","10"],"6"],
@@ -42,7 +43,7 @@ const questions=[
  ["Hasil dari 8 ÷ 1/2 adalah ...",["4","8","12","16"],"16"]
 ];
 const emojis=["🍎","🍊","🍋","🍉"];
-let stream=null,task=null,fruits=[],idx=0,score=0,locked=false,running=false,raf=0,lastDetect=0;
+let stream=null,hand=null,fruits=[],idx=0,score=0,locked=false,running=false,raf=0,lastDetect=0;
 
 function clearFruits(){fruits.forEach(f=>f.el.remove());fruits=[]}
 function makeQuestion(){
@@ -51,7 +52,7 @@ function makeQuestion(){
  [...answers].sort(()=>Math.random()-.5).forEach((a,i)=>{
   const el=document.createElement('div');el.className='fruit';el.innerHTML=emojis[i]+'<span>'+a+'</span>';el.dataset.answer=a;
   el.style.left=(7+i*23+Math.random()*8)+'%';el.style.top=(-80-Math.random()*130)+'px';game.appendChild(el);
-  fruits.push({el,y:parseFloat(el.style.top),vy:1.0+Math.random()*.7});
+  fruits.push({el,y:parseFloat(el.style.top),vy:1+Math.random()*.7});
  });
 }
 function gameLoop(){
@@ -69,58 +70,80 @@ function hit(x,y){
  for(const f of fruits){const r=f.el.getBoundingClientRect();if(Math.hypot(x-(r.left+r.width/2),y-(r.top+r.height/2))<52){choose(f);break}}
 }
 
-async function loadHand(){
- statusEl.textContent='Kamera aktif. Memuat deteksi tangan (CPU)...';
+function loadScript(src){
+ return new Promise((resolve,reject)=>{
+  const s=document.createElement('script');s.src=src;s.async=true;
+  s.onload=()=>resolve();s.onerror=()=>reject(new Error('Gagal memuat '+src));
+  document.head.appendChild(s);
+ });
+}
+
+async function loadHandLibrary(){
+ const urls=[
+  'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469404/hands.js',
+  'https://unpkg.com/@mediapipe/hands@0.4.1675469404/hands.js'
+ ];
+ let last=null;
+ for(const u of urls){
+  try{await loadScript(u);if(window.Hands)return true}catch(e){last=e}
+ }
+ throw last||new Error('Library tangan tidak tersedia');
+}
+
+async function initHands(){
+ statusEl.textContent='Kamera aktif. Menghubungkan mesin deteksi tangan...';
  try{
-  const mp=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm');
-  const vision=await mp.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm');
-  task=await mp.HandLandmarker.createFromOptions(vision,{
-   baseOptions:{
-    modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
-    delegate:'CPU'
-   },
-   runningMode:'VIDEO',numHands:1,
-   minHandDetectionConfidence:.35,minHandPresenceConfidence:.35,minTrackingConfidence:.35
+  await loadHandLibrary();
+  hand=new window.Hands({locateFile:(file)=>'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469404/'+file});
+  hand.setOptions({
+   maxNumHands:1,
+   modelComplexity:0,
+   minDetectionConfidence:0.35,
+   minTrackingConfidence:0.35
   });
-  statusEl.textContent='✅ Deteksi siap. Arahkan satu tangan ke kamera...';
-  requestAnimationFrame(detect);
+  hand.onResults(onResults);
+  statusEl.textContent='✅ Mesin siap. Arahkan telapak tangan ke kamera...';
+  detectLoop();
  }catch(e){
   console.error(e);
-  statusEl.textContent='❌ Model tangan gagal dimuat: '+(e.message||e);
+  statusEl.textContent='❌ Library deteksi tangan tidak dapat dimuat. Coba Wi-Fi/data lain.';
   startBtn.disabled=false;
  }
 }
 
-function detect(t){
- if(!running||!task)return;
- if(video.readyState>=2 && t-lastDetect>80){
-  lastDetect=t;
-  try{
-   const result=task.detectForVideo(video,t);
-   const rect=game.getBoundingClientRect();
-   if(result.landmarks && result.landmarks.length){
-    const p=result.landmarks[0][8];
-    const x=(1-p.x)*rect.width,y=p.y*rect.height;
-    cursor.style.display='block';cursor.style.left=x+'px';cursor.style.top=y+'px';
-    statusEl.textContent='🟢 Tangan terdeteksi — gerakkan telunjuk ke jawaban';
-    hit(rect.left+x,rect.top+y);
-   }else{
-    cursor.style.display='none';
-    statusEl.textContent='🟡 Kamera aktif — tangan belum terdeteksi';
-   }
-  }catch(e){statusEl.textContent='⚠️ Deteksi berjalan tetapi ada error: '+e.message}
+function onResults(res){
+ const rect=game.getBoundingClientRect();
+ if(res.multiHandLandmarks && res.multiHandLandmarks.length){
+  const p=res.multiHandLandmarks[0][8];
+  const x=(1-p.x)*rect.width,y=p.y*rect.height;
+  cursor.style.display='block';cursor.style.left=x+'px';cursor.style.top=y+'px';
+  statusEl.textContent='🟢 Tangan terdeteksi — gerakkan telunjuk ke jawaban';
+  hit(rect.left+x,rect.top+y);
+ }else{
+  cursor.style.display='none';
+  statusEl.textContent='🟡 Kamera aktif — arahkan telapak tangan ke kamera';
  }
- requestAnimationFrame(detect);
+}
+
+async function detectLoop(){
+ if(!running||!hand)return;
+ const now=performance.now();
+ if(video.readyState>=2 && now-lastDetect>90){
+  lastDetect=now;
+  try{await hand.send({image:video})}catch(e){console.error(e)}
+ }
+ if(running)requestAnimationFrame(detectLoop);
 }
 
 async function start(){
  if(running)return;
  startBtn.disabled=true;statusEl.textContent='Meminta izin kamera...';
  try{
+  if(!navigator.mediaDevices?.getUserMedia)throw new Error('Browser tidak mendukung kamera');
   stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'user'},width:{ideal:960},height:{ideal:540}},audio:false});
   video.srcObject=stream;await video.play();
   idx=0;score=0;scoreEl.textContent='0';running=true;makeQuestion();gameLoop();
-  await loadHand();
+  await initHands();
  }catch(e){
   statusEl.textContent='❌ Kamera gagal: '+e.name+' — '+e.message;startBtn.disabled=false;
  }
